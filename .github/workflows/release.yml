@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: go mod tidy
 
-      - name: Build plugin
+      - name: Build and package plugin
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
@@ -78,34 +78,15 @@ jobs:
           LIB="codex-auto-ping.${EXT}"
           ASSET="codex-auto-ping_${VERSION}_${GOOS}_${GOARCH}.zip"
 
-          CGO_ENABLED=1 go build \
-            -trimpath \
-            -buildmode=c-shared \
-            -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
-            -o "package/${LIB}" .
-
+          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w -X main.pluginVersion=${VERSION}" -o "package/${LIB}" .
           rm -f package/*.h
 
-          python - <<'PY'
-import os, zipfile
-version = os.environ["REF_NAME"]
-if os.environ["REF_TYPE"] == "tag":
-    version = version.removeprefix("v")
-else:
-    version = version.removeprefix("release/v")
-goos = os.environ["GOOS"]
-goarch = os.environ["GOARCH"]
-ext = os.environ["EXT"]
-asset = f"dist/codex-auto-ping_{version}_{goos}_{goarch}.zip"
-lib = f"package/codex-auto-ping.{ext}"
-with open(lib, "rb") as f:
-    data = f.read()
-with zipfile.ZipFile(asset, "w", compression=zipfile.ZIP_DEFLATED) as z:
-    z.writestr(f"codex-auto-ping.{ext}", data)
-with zipfile.ZipFile(asset) as z:
-    expected = [f"codex-auto-ping.{ext}"]
-    assert z.namelist() == expected, (asset, z.namelist(), expected)
-PY
+          (
+            cd package
+            python -m zipfile -c "../dist/${ASSET}" "${LIB}"
+          )
+
+          python -m zipfile -l "dist/${ASSET}"
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
