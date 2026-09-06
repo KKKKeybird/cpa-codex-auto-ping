@@ -56,24 +56,57 @@ jobs:
         shell: bash
         run: go mod tidy
 
-      - name: Build
+      - name: Build plugin
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ github.ref_name }}
+          EXT: ${{ matrix.ext }}
         run: |
-          mkdir -p dist
+          set -euo pipefail
           VERSION="${VERSION#v}"
-          OUT="codex-auto-ping_${VERSION}_${GOOS}_${GOARCH}.${{ matrix.ext }}"
-          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w -X main.pluginVersion=${VERSION}" -o "dist/${OUT}" .
-          rm -f dist/*.h
+          mkdir -p package dist
+          LIB="codex-auto-ping.${EXT}"
+          ASSET="codex-auto-ping_${VERSION}_${GOOS}_${GOARCH}.zip"
 
-      - name: Upload artifact
+          CGO_ENABLED=1 go build \
+            -trimpath \
+            -buildmode=c-shared \
+            -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
+            -o "package/${LIB}" .
+
+          rm -f package/*.h
+
+          python -m zipfile -c "dist/${ASSET}" "package/${LIB}"
+          python - <<'PY'
+import os, zipfile
+asset = next(os.path.join("dist", name) for name in os.listdir("dist") if name.endswith(".zip"))
+with zipfile.ZipFile(asset) as z:
+    names = z.namelist()
+    expected = "codex-auto-ping." + os.environ["EXT"]
+    # python -m zipfile preserves the source path, so rewrite if needed.
+    if names != [expected]:
+        data = z.read(names[0])
+        z.close()
+        os.remove(asset)
+        with zipfile.ZipFile(asset, "w", compression=zipfile.ZIP_DEFLATED) as out:
+            out.writestr(expected, data)
+PY
+
+          python - <<'PY'
+import os, zipfile
+asset = next(os.path.join("dist", name) for name in os.listdir("dist") if name.endswith(".zip"))
+with zipfile.ZipFile(asset) as z:
+    expected = "codex-auto-ping." + os.environ["EXT"]
+    assert z.namelist() == [expected], (asset, z.namelist())
+PY
+
+      - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
           name: codex-auto-ping-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
+          path: dist/*.zip
           if-no-files-found: error
 
   release:
@@ -82,20 +115,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download artifacts
+      - name: Download platform archives
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
 
       - name: Generate checksums
+        shell: bash
         run: |
+          set -euo pipefail
           cd release-assets
-          sha256sum * > checksums.txt
+          sha256sum *.zip | sort -k 2 > checksums.txt
+          cat checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            release-assets/*
+            release-assets/*.zip
+            release-assets/checksums.txt
