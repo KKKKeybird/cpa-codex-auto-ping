@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: so
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: so
+          - runner: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: dylib
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: dylib
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: dll
+          - runner: windows-latest
+            goos: windows
+            goarch: arm64
+            ext: dll
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Install cross compiler (Linux arm64)
+        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          case "${GOOS}-${GOARCH}" in
+            linux-amd64)
+              export CC=gcc
+              ;;
+            linux-arm64)
+              export CC=aarch64-linux-gnu-gcc
+              ;;
+          esac
+          VERSION="${VERSION#v}"
+          OUT="codex-auto-ping_${VERSION}_${GOOS}_${GOARCH}.${{ matrix.ext }}"
+          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w -X main.pluginVersion=${VERSION}" -o "dist/${OUT}" .
+          rm -f dist/*.h
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-auto-ping-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/*
