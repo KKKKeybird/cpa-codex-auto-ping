@@ -20,11 +20,11 @@ jobs:
             goos: linux
             goarch: amd64
             ext: so
-          - runner: ubuntu-latest
+          - runner: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
             ext: so
-          - runner: macos-latest
+          - runner: macos-15-intel
             goos: darwin
             goarch: amd64
             ext: dylib
@@ -36,7 +36,7 @@ jobs:
             goos: windows
             goarch: amd64
             ext: dll
-          - runner: windows-latest
+          - runner: windows-11-arm
             goos: windows
             goarch: arm64
             ext: dll
@@ -51,13 +51,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
-          cache: true
+          cache: false
 
-      - name: Install cross compiler (Linux arm64)
-        if: matrix.goos == 'linux' && matrix.goarch == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Resolve dependencies
+        shell: bash
+        run: go mod tidy
 
       - name: Build
         shell: bash
@@ -66,14 +64,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          case "${GOOS}-${GOARCH}" in
-            linux-amd64)
-              export CC=gcc
-              ;;
-            linux-arm64)
-              export CC=aarch64-linux-gnu-gcc
-              ;;
-          esac
           CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w" -o "dist/codex-auto-ping.${{ matrix.ext }}" .
           rm -f dist/*.h
 
