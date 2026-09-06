@@ -36,10 +36,6 @@ jobs:
             goos: windows
             goarch: amd64
             ext: dll
-          - runner: windows-11-arm
-            goos: windows
-            goarch: arm64
-            ext: dll
 
     runs-on: ${{ matrix.runner }}
 
@@ -64,9 +60,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          if [[ "${{ matrix.goos }}-${{ matrix.goarch }}" == "windows-arm64" ]]; then
-            export CC=clang
-          fi
           CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w" -o "dist/codex-auto-ping.${{ matrix.ext }}" .
           rm -f dist/*.h
 
