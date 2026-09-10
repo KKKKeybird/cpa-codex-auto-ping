@@ -75,7 +75,7 @@ const (
     pluginID   = "codex-auto-ping"
 )
 
-var pluginVersion = "0.1.0"
+var pluginVersion = "0.1.1"
 
 type pluginConfig struct {
     Interval        string `yaml:"interval"`
@@ -142,13 +142,13 @@ type capabilityFlags struct {
 }
 
 type managementRegistrationResponse struct {
-    Resources []resourceRoute `json:"resources,omitempty"`
+    Routes []managementRoute `json:"routes,omitempty"`
 }
 
-type resourceRoute struct {
+type managementRoute struct {
+    Method      string `json:"Method"`
     Path        string `json:"Path"`
-    Menu        string `json:"Menu"`
-    Description string `json:"Description"`
+    Description string `json:"Description,omitempty"`
 }
 
 type managementResponse struct {
@@ -243,9 +243,9 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 
     case pluginabi.MethodManagementRegister:
         return okEnvelope(managementRegistrationResponse{
-            Resources: []resourceRoute{{
-                Path:        "/status",
-                Menu:        "Codex Auto Ping",
+            Routes: []managementRoute{{
+                Method:      http.MethodGet,
+                Path:        "/plugins/codex-auto-ping/status",
                 Description: "Show scheduler state and recent ping result.",
             }},
         })

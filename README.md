@@ -65,10 +65,10 @@ Then restart CLIProxyAPI and enable the plugin configuration above.
 The plugin registers:
 
 ```text
-/v0/resource/plugins/codex-auto-ping/status
+/v0/management/plugins/codex-auto-ping/status
 ```
 
-The endpoint returns JSON containing the last attempt, last success, last error, counters, and next scheduled run.
+The endpoint is protected by CLIProxyAPI's Management API authentication and returns JSON containing the last attempt, last success, last error, counters, and next scheduled run. It does not register any unauthenticated routes under `/v0/resource/plugins/`.
 
 ## Current limitation
 
