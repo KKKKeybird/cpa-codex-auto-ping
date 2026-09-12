@@ -11,32 +11,16 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+  build-linux:
+    name: Build linux-${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: so
+            arch: amd64
           - runner: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-            ext: so
-          - runner: macos-15-intel
-            goos: darwin
-            goarch: amd64
-            ext: dylib
-          - runner: macos-latest
-            goos: darwin
-            goarch: arm64
-            ext: dylib
-          - runner: windows-latest
-            goos: windows
-            goarch: amd64
-            ext: dll
+            arch: arm64
 
     runs-on: ${{ matrix.runner }}
 
@@ -44,22 +28,80 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.x'
-          cache: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Resolve dependencies
+      - name: Build musl plugin
         shell: bash
-        run: go mod tidy
+        env:
+          ARCH: ${{ matrix.arch }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            VERSION="${REF_NAME#v}"
+          else
+            VERSION="${REF_NAME#release/v}"
+          fi
+
+          mkdir -p package dist
+          docker buildx build \
+            --platform "linux/${ARCH}" \
+            --file Dockerfile.release-linux \
+            --output type=local,dest=package \
+            .
+          ASSET="codex-auto-ping_${VERSION}_linux_${ARCH}.zip"
+          python -m zipfile -c "dist/${ASSET}" package/codex-auto-ping.so
+          python -m zipfile -l "dist/${ASSET}"
+
+      - name: Upload release asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-auto-ping-linux-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  build-desktop:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            os: darwin
+            arch: amd64
+            ext: dylib
+            library: libcodex_auto_ping.dylib
+          - runner: macos-latest
+            os: darwin
+            arch: arm64
+            ext: dylib
+            library: libcodex_auto_ping.dylib
+          - runner: windows-latest
+            os: windows
+            arch: amd64
+            ext: dll
+            library: codex_auto_ping.dll
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.94.0'
 
       - name: Build and package plugin
         shell: bash
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
           EXT: ${{ matrix.ext }}
+          LIBRARY: ${{ matrix.library }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
@@ -72,10 +114,10 @@ jobs:
 
           mkdir -p package dist
           LIB="codex-auto-ping.${EXT}"
-          ASSET="codex-auto-ping_${VERSION}_${GOOS}_${GOARCH}.zip"
+          ASSET="codex-auto-ping_${VERSION}_${OS}_${ARCH}.zip"
 
-          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w -X main.pluginVersion=${VERSION}" -o "package/${LIB}" .
-          rm -f package/*.h
+          cargo build --locked --release
+          cp "target/release/${LIBRARY}" "package/${LIB}"
 
           (
             cd package
@@ -87,13 +129,13 @@ jobs:
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
-          name: codex-auto-ping-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: codex-auto-ping-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*.zip
           if-no-files-found: error
 
   release:
     name: Publish Release
-    needs: build
+    needs: [build-linux, build-desktop]
     runs-on: ubuntu-latest
 
     steps:

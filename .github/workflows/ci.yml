@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.94.0'
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  linux-musl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Linux musl library
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --file Dockerfile.release-linux \
+            --output type=local,dest=dist-linux \
+            .
+          test -s dist-linux/codex-auto-ping.so
