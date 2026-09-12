@@ -40,7 +40,7 @@ Adds the Codex Auto Ping plugin to the official CLIProxyAPI plugin registry.
 - Latest release: v0.2.0
 - Capability: sends a tiny scheduled Codex request through CLIProxyAPI's host.model.execute callback.
 - Release assets: platform-specific ZIP archives plus checksums.txt in the format required by the plugin store.
-- Runtime: Rust implementation with musl-compatible Linux libraries, avoiding the Go shared-library TLS limitation on Alpine.
+- Runtime: C++ implementation with musl-compatible Linux libraries, avoiding the Go shared-library TLS limitation on Alpine.
 - Security: the dynamic status endpoint is registered only under the authenticated Management API; no unauthenticated resource routes are exposed.
 
 The plugin does not directly read or refresh OAuth refresh tokens.

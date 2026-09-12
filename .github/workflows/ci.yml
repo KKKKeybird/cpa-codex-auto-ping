@@ -10,26 +10,20 @@ permissions:
   contents: read
 
 jobs:
-  rust:
+  native:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.94.0'
-          components: rustfmt, clippy
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
 
-      - name: Check formatting
-        run: cargo fmt --check
+      - name: Build
+        run: cmake --build build --parallel
 
       - name: Test
-        run: cargo test --locked
-
-      - name: Lint
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: ctest --test-dir build --output-on-failure
 
   linux-musl:
     runs-on: ubuntu-latest
@@ -44,7 +38,7 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/amd64 \
-            --file Dockerfile.release-linux \
+            --file Dockerfile.plugin \
             --output type=local,dest=dist-linux \
             .
           test -s dist-linux/codex-auto-ping.so

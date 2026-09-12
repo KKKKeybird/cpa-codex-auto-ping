@@ -1,27 +1,22 @@
 PLUGIN_NAME ?= codex-auto-ping
 BUILD_DIR ?= dist
-OS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
-
-EXT_linux = so
-EXT_darwin = dylib
-EXT_windows_nt = dll
-PLUGIN_EXT = $(or $(EXT_$(OS)),so)
-PLUGIN_OUTPUT ?= $(BUILD_DIR)/$(PLUGIN_NAME).$(PLUGIN_EXT)
 
 .PHONY: build test lint clean
 
 build:
-	mkdir -p $(dir $(PLUGIN_OUTPUT))
-	cargo build --locked --release
-	cp target/release/libcodex_auto_ping.$(PLUGIN_EXT) $(PLUGIN_OUTPUT)
+	cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+	cmake --build build --config Release
+	cmake -E make_directory $(BUILD_DIR)
+	cmake -E copy_if_different build/$(PLUGIN_NAME).* $(BUILD_DIR)/
 
 test:
-	cargo test --locked
+	cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+	cmake --build build --config Debug
+	ctest --test-dir build --output-on-failure -C Debug
 
 lint:
-	cargo fmt --check
-	cargo clippy --locked --all-targets -- -D warnings
+	clang-format --dry-run --Werror src/plugin.cpp tests/plugin_test.cpp
 
 clean:
-	cargo clean
 	rm -rf $(BUILD_DIR)
+	rm -rf build

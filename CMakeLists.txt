@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.16)
+project(codex_auto_ping VERSION 0.2.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(Threads REQUIRED)
+
+add_library(codex-auto-ping SHARED src/plugin.cpp)
+target_link_libraries(codex-auto-ping PRIVATE Threads::Threads)
+target_compile_definitions(codex-auto-ping PRIVATE PLUGIN_VERSION="${PROJECT_VERSION}")
+set_target_properties(codex-auto-ping PROPERTIES PREFIX "" OUTPUT_NAME "codex-auto-ping")
+
+if(MSVC)
+  target_compile_options(codex-auto-ping PRIVATE /W4 /EHsc)
+else()
+  target_compile_options(codex-auto-ping PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(plugin-tests tests/plugin_test.cpp)
+  target_link_libraries(plugin-tests PRIVATE Threads::Threads)
+  target_compile_definitions(plugin-tests PRIVATE PLUGIN_VERSION="${PROJECT_VERSION}")
+  if(MSVC)
+    target_compile_options(plugin-tests PRIVATE /W4 /EHsc)
+  else()
+    target_compile_options(plugin-tests PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+  add_test(NAME plugin-tests COMMAND plugin-tests)
+endif()

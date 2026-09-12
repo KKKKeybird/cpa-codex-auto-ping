@@ -48,7 +48,7 @@ jobs:
           mkdir -p package dist
           docker buildx build \
             --platform "linux/${ARCH}" \
-            --file Dockerfile.release-linux \
+            --file Dockerfile.plugin \
             --output type=local,dest=package \
             .
           ASSET="codex-auto-ping_${VERSION}_linux_${ARCH}.zip"
@@ -72,17 +72,14 @@ jobs:
             os: darwin
             arch: amd64
             ext: dylib
-            library: libcodex_auto_ping.dylib
           - runner: macos-latest
             os: darwin
             arch: arm64
             ext: dylib
-            library: libcodex_auto_ping.dylib
           - runner: windows-latest
             os: windows
             arch: amd64
             ext: dll
-            library: codex_auto_ping.dll
 
     runs-on: ${{ matrix.runner }}
 
@@ -90,18 +87,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.94.0'
-
       - name: Build and package plugin
         shell: bash
         env:
           OS: ${{ matrix.os }}
           ARCH: ${{ matrix.arch }}
           EXT: ${{ matrix.ext }}
-          LIBRARY: ${{ matrix.library }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
@@ -116,8 +107,13 @@ jobs:
           LIB="codex-auto-ping.${EXT}"
           ASSET="codex-auto-ping_${VERSION}_${OS}_${ARCH}.zip"
 
-          cargo build --locked --release
-          cp "target/release/${LIBRARY}" "package/${LIB}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --config Release --parallel
+          if [[ "${OS}" == "windows" ]]; then
+            cp "build/Release/codex-auto-ping.dll" "package/${LIB}"
+          else
+            cp "build/codex-auto-ping.${EXT}" "package/${LIB}"
+          fi
 
           (
             cd package

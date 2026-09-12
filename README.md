@@ -2,7 +2,7 @@
 
 A small native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) that periodically sends a tiny model request through CLIProxyAPI's own `host.model.execute` callback.
 
-The plugin is implemented in Rust and exposes CLIProxyAPI's language-neutral C ABI. Linux release libraries are built against musl, so they can be loaded by Alpine-based CLIProxyAPI images without embedding a second Go runtime.
+The plugin is implemented in C++ and exposes CLIProxyAPI's language-neutral C ABI. Linux release libraries are built against musl, so they can be loaded by Alpine-based CLIProxyAPI images without embedding a second Go runtime.
 
 It is intended to keep Codex's rolling usage window active with minimal token consumption. The plugin does **not** read, rotate, or refresh OAuth tokens itself.
 
@@ -41,7 +41,7 @@ For multiple Codex accounts, `pings_per_cycle` can be set to the account count w
 
 ## Build
 
-Requires a recent stable Rust toolchain:
+Requires CMake and a C++17 compiler:
 
 ```bash
 make build
