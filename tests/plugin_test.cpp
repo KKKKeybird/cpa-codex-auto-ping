@@ -55,6 +55,22 @@ int main() {
   assert(registration.find("\"schema_version\":6") != std::string::npos);
   stop_scheduler();
 
+  // Dynamic runtime state must only be exposed through an authenticated
+  // Management API route. Never register it as a public resource.
+  const auto management_registration =
+      handle_method("management.register", "{}");
+  assert(management_registration.find("\"ok\":true") != std::string::npos);
+  assert(management_registration.find("\"routes\"") != std::string::npos);
+  assert(management_registration.find("\"Method\":\"GET\"") !=
+         std::string::npos);
+  assert(management_registration.find(
+             "\"Path\":\"/plugins/codex-auto-ping/status\"") !=
+         std::string::npos);
+  assert(management_registration.find("\"resources\"") ==
+         std::string::npos);
+  assert(management_registration.find("/v0/resource/plugins/") ==
+         std::string::npos);
+
   cliproxy_host_api host{kABIVersion, nullptr, fake_host_call, fake_host_free};
   cliproxy_plugin_api api{};
   assert(cliproxy_plugin_init(&host, &api) == 0);
