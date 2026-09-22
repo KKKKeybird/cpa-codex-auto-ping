@@ -10,31 +10,66 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+  build-linux:
+    name: Build linux-${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: so
+            arch: amd64
           - runner: ubuntu-24.04-arm
-            goos: linux
-            goarch: arm64
-            ext: so
+            arch: arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # The plugin is loaded by the musl-based CLIProxyAPI image, so build the
+      # Linux shared library with the same musl toolchain the release uses.
+      - name: Build musl plugin
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          docker buildx build \
+            --platform "linux/${ARCH}" \
+            --file Dockerfile.plugin \
+            --output type=local,dest=dist \
+            .
+          test -s dist/codex-auto-ping.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-auto-ping-linux-${{ matrix.arch }}
+          path: dist/codex-auto-ping.so
+          if-no-files-found: error
+
+  build-desktop:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - runner: macos-15-intel
-            goos: darwin
-            goarch: amd64
+            os: darwin
+            arch: amd64
             ext: dylib
           - runner: macos-latest
-            goos: darwin
-            goarch: arm64
+            os: darwin
+            arch: arm64
             ext: dylib
           - runner: windows-latest
-            goos: windows
-            goarch: amd64
+            os: windows
+            arch: amd64
             ext: dll
 
     runs-on: ${{ matrix.runner }}
@@ -43,29 +78,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26.x'
-          cache: false
-
-      - name: Resolve dependencies
-        shell: bash
-        run: go mod tidy
-
-      - name: Build
+      - name: Build plugin
         shell: bash
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+          OS: ${{ matrix.os }}
+          EXT: ${{ matrix.ext }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -ldflags "-s -w" -o "dist/codex-auto-ping.${{ matrix.ext }}" .
-          rm -f dist/*.h
+          LIB="codex-auto-ping.${EXT}"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --config Release --parallel
+          if [[ "${OS}" == "windows" ]]; then
+            cp "build/Release/${LIB}" "dist/${LIB}"
+          else
+            cp "build/${LIB}" "dist/${LIB}"
+          fi
+          test -s "dist/${LIB}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-auto-ping-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: codex-auto-ping-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/codex-auto-ping.${{ matrix.ext }}
           if-no-files-found: error
