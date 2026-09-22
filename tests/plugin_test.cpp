@@ -49,6 +49,53 @@ int main() {
   assert(!cfg.run_on_start);
   assert(cfg.model == "gpt-test");
 
+  // A store-managed install hands over the whole subtree: host wrappers plus
+  // the store manifest with a YAML sequence (tags) and nested mappings. None of
+  // it may be mistaken for plugin settings, and none of it may fail the parse.
+  const auto store_managed = base64_encode(
+      "enabled: true\n"
+      "priority: 1\n"
+      "interval: \"5h\"\n"
+      "startup_delay: \"10s\"\n"
+      "run_on_start: true\n"
+      "model: \"gpt-5.6-luna\"\n"
+      "prompt: \"1\"\n"
+      "max_output_tokens: 1\n"
+      "pings_per_cycle: 1\n"
+      "ping_spacing: \"3s\"\n"
+      "store:\n"
+      "  id: codex-auto-ping\n"
+      "  name: Codex Auto Ping\n"
+      "  version: 0.2.1\n"
+      "  release-tag: v0.2.1\n"
+      "  source-id: official\n"
+      "  source-url: https://example.invalid/registry.json\n"
+      "  tags:\n"
+      "    - Codex\n"
+      "    - Usage\n"
+      "  install:\n"
+      "    type: github-release\n"
+      "    model: shadowed-nested-value\n");
+  const auto stored = parse_config(
+      "{\"config_yaml\":\"" + store_managed + "\",\"schema_version\":6}");
+  assert(stored.interval == std::chrono::hours(5));
+  assert(stored.startup_delay == std::chrono::seconds(10));
+  assert(stored.run_on_start);
+  assert(stored.model == "gpt-5.6-luna");
+  assert(stored.prompt == "1");
+  assert(stored.max_output_tokens == 1);
+  assert(stored.pings_per_cycle == 1);
+  assert(stored.ping_spacing == std::chrono::seconds(3));
+
+  // Unknown top-level keys and stray colon-less lines are ignored, not fatal.
+  const auto tolerant = base64_encode(
+      "model: gpt-tolerant\nunknown-key: value\n- stray sequence item\n"
+      "interval: 1h\n");
+  const auto tolerant_cfg = parse_config(
+      "{\"config_yaml\":\"" + tolerant + "\",\"schema_version\":6}");
+  assert(tolerant_cfg.model == "gpt-tolerant");
+  assert(tolerant_cfg.interval == std::chrono::hours(1));
+
   const auto registration = handle_method(
       "plugin.register", "{\"config_yaml\":\"\",\"schema_version\":6}");
   assert(registration.find("\"management_api\":true") != std::string::npos);

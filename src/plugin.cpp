@@ -304,11 +304,24 @@ Config parse_config(const std::string &request) {
   if (encoded.empty()) return cfg;
   std::istringstream lines(base64_decode(encoded));
   std::string line;
+  // The host forwards the whole plugin subtree, which also carries host-owned
+  // wrappers (enabled/priority) and, once the plugin is store-managed, the
+  // plugin-store manifest (store: with a tags sequence and an install mapping).
+  // Only keys indented like this plugin's own keys belong to this plugin, so
+  // nested blocks are skipped instead of being read as plugin settings.
+  std::size_t top_indent = std::string::npos;
   while (std::getline(lines, line)) {
-    line = trim(line);
-    if (line.empty() || line.front() == '#') continue;
+    const auto indent = line.find_first_not_of(" \t");
+    if (indent == std::string::npos) continue;
+    if (line[indent] == '#') continue;
+    if (top_indent == std::string::npos) top_indent = indent;
+    if (indent > top_indent) continue;
+    if (indent < top_indent) top_indent = indent;
+    line = trim(line.substr(indent));
     const auto colon = line.find(':');
-    if (colon == std::string::npos) throw std::runtime_error("invalid plugin config");
+    // Tolerate lines the host passes through untouched (sequence items, prose
+    // values, future manifest fields) instead of rejecting the whole config.
+    if (colon == std::string::npos) continue;
     const auto key = trim(line.substr(0, colon));
     const auto value = unquote_yaml(line.substr(colon + 1));
     if (key == "interval" && !value.empty()) {
