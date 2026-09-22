@@ -6,6 +6,14 @@ The plugin is implemented in C++ and exposes CLIProxyAPI's language-neutral C AB
 
 It is intended to keep Codex's rolling usage window active with minimal token consumption. The plugin does **not** read, rotate, or refresh OAuth tokens itself.
 
+## Install from the official plugin store
+
+`codex-auto-ping` is listed in the official [CLIProxyAPI Plugins Store](https://github.com/router-for-me/CLIProxyAPI-Plugins-Store).
+
+In CLIProxyAPI Management Center, open the plugin store, search for **Codex Auto Ping**, install it, and enable the plugin. CLIProxyAPI downloads the release asset for the current platform and verifies it using the published checksum.
+
+After installation, apply the configuration below and restart CLIProxyAPI if your deployment does not reload plugins automatically.
+
 ## Default behavior
 
 - first ping: 10 seconds after plugin starts
@@ -37,7 +45,7 @@ plugins:
 
 If your Codex model alias is different, set `model` to the exact model name exposed by your CLIProxyAPI instance.
 
-For multiple Codex accounts, `pings_per_cycle` can be set to the account count when CLIProxyAPI uses round-robin routing. This is currently best-effort; v0.1 cannot pin `host.model.execute` to an individual auth ID.
+For multiple Codex accounts, `pings_per_cycle` can be set to the account count when CLIProxyAPI uses round-robin routing. This is currently best-effort; the plugin cannot pin `host.model.execute` to an individual auth ID.
 
 ## Build
 
@@ -74,7 +82,7 @@ The endpoint is protected by CLIProxyAPI's Management API authentication and ret
 
 ## Current limitation
 
-v0.1 deliberately uses CLIProxyAPI's normal model scheduler. It therefore cannot guarantee exactly one ping per individual Codex credential.
+The plugin deliberately uses CLIProxyAPI's normal model scheduler. It therefore cannot guarantee exactly one ping per individual Codex credential.
 
 A future version can use CLIProxyAPI's `host.auth.*` callbacks together with credential-specific execution if/when auth pinning is available to `host.model.execute`.
 
