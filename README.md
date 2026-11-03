@@ -2,7 +2,7 @@
 
 A small native plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) that periodically sends a tiny model request through CLIProxyAPI's own `host.model.execute` callback.
 
-The plugin is implemented in C++ and exposes CLIProxyAPI's language-neutral C ABI. Linux release libraries are built against musl, so they can be loaded by Alpine-based CLIProxyAPI images without embedding a second Go runtime.
+The plugin is implemented in C++ and exposes CLIProxyAPI's language-neutral C ABI. Default Linux release archives are built against Debian Bookworm/glibc for current CLIProxyAPI Docker images. Separate `_musl.zip` archives support Alpine-based images. Both statically link the C++ runtime and avoid embedding a second Go runtime. Do not load a musl archive into a glibc process or vice versa.
 
 It is intended to keep Codex's rolling usage window active with minimal token consumption. The plugin does **not** read, rotate, or refresh OAuth tokens itself.
 
@@ -71,13 +71,23 @@ plugins:
       ping_spacing: "3s"
 ```
 
+Daily times use the **CPA process's local timezone**. In Docker, set `TZ=Asia/Shanghai` and ensure the container has timezone data. Status timestamps use UTC (`Z`): Shanghai `06:55` is `22:55Z` on the previous day. Times must be `HH:MM` strings from `00:00` to `23:59`; the list is sorted and deduplicated and must not be empty in `times` mode.
+
+In `times` mode, `interval`, `run_on_start`, and `startup_delay` do not affect scheduling. Startup waits for the next future configured time; missed runs are not replayed. To return to interval mode, set `schedule_mode: interval`, remove `schedule_times`, and restore `interval: 5h`, `run_on_start: true`, and `startup_delay: 10s`.
+
 If your Codex model alias is different, set `model` to the exact model name exposed by your CLIProxyAPI instance.
 
 For multiple Codex accounts, `pings_per_cycle` can be set to the account count when CLIProxyAPI uses round-robin routing. This is currently best-effort; the plugin cannot pin `host.model.execute` to an individual auth ID.
 
 ## Build
 
-Requires CMake and a C++17 compiler:
+Linux archive selection:
+- `codex-auto-ping_<version>_linux_<arch>.zip`: glibc (Debian Bookworm or newer), also the default plugin-store asset.
+- `codex-auto-ping_<version>_linux_<arch>_musl.zip`: musl (Alpine 3.22), install manually in Alpine deployments.
+
+For a reproducible Linux build, use `docker buildx build -f Dockerfile.plugin --build-arg LIBC=glibc --output type=local,dest=dist .`; use `LIBC=musl` for Alpine. The build runs unit tests and a dynamic loading/ABI check. CI also loads each Linux library in its runtime image, including the current CPA Docker image for glibc.
+
+Native builds require CMake and a C++17 compiler:
 
 ```bash
 make build
