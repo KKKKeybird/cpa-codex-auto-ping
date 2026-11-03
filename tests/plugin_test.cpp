@@ -48,6 +48,49 @@ int main() {
   assert(cfg.interval == std::chrono::hours(2));
   assert(!cfg.run_on_start);
   assert(cfg.model == "gpt-test");
+  assert(cfg.schedule_mode == "interval");
+
+  const auto parse_yaml = [](const std::string &yaml) {
+    return parse_config("{\"config_yaml\":\"" + base64_encode(yaml) + "\"}");
+  };
+  const auto daily = parse_yaml(
+      "schedule_mode: \"times\" # daily schedule\nschedule_times:\n"
+      "  - \"18:30\" # evening\n  - '08:00'\n  - 08:00\n"
+      "model: daily-model\nstore:\n  schedule_times:\n    - invalid\n");
+  assert(daily.schedule_times == std::vector<std::string>({"08:00", "18:30"}));
+  assert(daily.model == "daily-model");
+  assert(parse_yaml("schedule_mode: interval\nschedule_times: [ ]\n").schedule_times.empty());
+  assert(parse_yaml("schedule_mode: times\nschedule_times: [\"08:00\", '18:30'] # times\n")
+             .schedule_times == daily.schedule_times);
+  assert(parse_yaml("  schedule_mode: times\n  schedule_times:\n  - 08:00\n  - 18:30\n")
+             .schedule_times == daily.schedule_times);
+  for (const auto &yaml : {
+           "schedule_mode: unknown\n", "schedule_mode: times\n",
+           "schedule_mode: times\nschedule_times: []\n",
+           "schedule_mode: times\nschedule_times: [ ]\n",
+           "schedule_times: 08:00\n", "schedule_times: [24:00]\n",
+           "schedule_times: [08:60]\n", "schedule_times: [8:00]\n",
+           "schedule_times: [08:00:00]\n", "schedule_times: [aa:bb]\n",
+           "schedule_times:\n  invalid: 08:00\n"}) {
+    bool rejected = false;
+    try { parse_yaml(yaml); } catch (const std::exception &) { rejected = true; }
+    assert(rejected);
+  }
+  const auto local_time = [](int day, int hour, int minute) {
+    std::tm value{};
+    value.tm_year = 126;
+    value.tm_mon = 0;
+    value.tm_mday = day;
+    value.tm_hour = hour;
+    value.tm_min = minute;
+    value.tm_isdst = -1;
+    return Clock::from_time_t(std::mktime(&value));
+  };
+  assert(next_scheduled_time(daily, local_time(15, 7, 59)) == local_time(15, 8, 0));
+  assert(next_scheduled_time(daily, local_time(15, 8, 0)) == local_time(15, 18, 30));
+  assert(next_scheduled_time(daily, local_time(15, 23, 59)) == local_time(16, 8, 0));
+  const auto midnight = parse_yaml("schedule_mode: times\nschedule_times: [00:00]\n");
+  assert(next_scheduled_time(midnight, local_time(31, 23, 59)) == local_time(32, 0, 0));
 
   // A store-managed install hands over the whole subtree: host wrappers plus
   // the store manifest with a YAML sequence (tags) and nested mappings. None of
@@ -132,6 +175,19 @@ int main() {
   const auto body = base64_decode(json_string_field(status, "Body"));
   assert(body.find("\"last_status\": 200") != std::string::npos);
   assert(body.find("\"total_success\": 1") != std::string::npos);
+  assert(body.find("\"schedule_mode\": \"interval\"") != std::string::npos);
+
+  plugin_call(api, "plugin.reconfigure",
+              "{\"config_yaml\":\"" + base64_encode(
+                  "schedule_mode: times\nschedule_times: [08:00, 18:30]\n"
+                  "run_on_start: true\nstartup_delay: 0s\n") + "\"}");
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  const auto daily_body = base64_decode(json_string_field(
+      plugin_call(api, "management.handle", "{}"), "Body"));
+  assert(daily_body.find("\"schedule_mode\": \"times\"") != std::string::npos);
+  assert(daily_body.find("\"schedule_times\": [\"08:00\", \"18:30\"]") != std::string::npos);
+  assert(daily_body.find("\"next_run\"") != std::string::npos);
+  assert(daily_body.find("\"total_success\": 1") != std::string::npos);
   api.shutdown();
 
   std::cout << "plugin tests passed\n";

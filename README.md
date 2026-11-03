@@ -25,6 +25,10 @@ After installation, apply the configuration below and restart CLIProxyAPI if you
 
 ## CLIProxyAPI configuration
 
+Choose either example below. Omitting `schedule_mode` defaults to `interval`.
+
+Example 1: run every 5 hours.
+
 ```yaml
 plugins:
   enabled: true
@@ -33,9 +37,33 @@ plugins:
     codex-auto-ping:
       enabled: true
       priority: 1
+      schedule_mode: "interval"
       interval: "5h"
       startup_delay: "10s"
       run_on_start: true
+      model: "gpt-5.6"
+      prompt: "1"
+      max_output_tokens: 1
+      pings_per_cycle: 1
+      ping_spacing: "3s"
+```
+
+Example 2: run at scheduled times.
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs:
+    codex-auto-ping:
+      enabled: true
+      priority: 1
+      schedule_mode: "times"
+      schedule_times:
+        - "06:55"
+        - "12:00"
+        - "17:05"
+        - "22:10"
       model: "gpt-5.6"
       prompt: "1"
       max_output_tokens: 1

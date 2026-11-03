@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #ifndef PLUGIN_VERSION
 #define PLUGIN_VERSION "dev"
@@ -63,6 +64,8 @@ constexpr std::uint32_t kABIVersion = 1;
 constexpr const char *kPluginID = "codex-auto-ping";
 
 struct Config {
+  std::string schedule_mode = "interval";
+  std::vector<std::string> schedule_times;
   Duration interval = std::chrono::hours(5);
   Duration startup_delay = std::chrono::seconds(10);
   bool run_on_start = true;
@@ -310,12 +313,32 @@ Config parse_config(const std::string &request) {
   // Only keys indented like this plugin's own keys belong to this plugin, so
   // nested blocks are skipped instead of being read as plugin settings.
   std::size_t top_indent = std::string::npos;
+  bool reading_times = false;
+  const auto add_time = [&](const std::string &raw) {
+    const auto value = unquote_yaml(trim(raw.substr(0, raw.find(" #"))));
+    if (value.size() != 5 || value[2] != ':' ||
+        value[0] < '0' || value[0] > '2' ||
+        value[1] < '0' || value[1] > '9' ||
+        value[3] < '0' || value[3] > '5' ||
+        value[4] < '0' || value[4] > '9' || value.substr(0, 2) > "23") {
+      throw std::runtime_error("schedule_times entries must use HH:MM (00:00-23:59)");
+    }
+    cfg.schedule_times.push_back(value);
+  };
   while (std::getline(lines, line)) {
     const auto indent = line.find_first_not_of(" \t");
     if (indent == std::string::npos) continue;
     if (line[indent] == '#') continue;
     if (top_indent == std::string::npos) top_indent = indent;
+    if (reading_times && indent >= top_indent && line[indent] == '-') {
+      add_time(line.substr(indent + 1));
+      continue;
+    }
+    if (reading_times && indent > top_indent) {
+      throw std::runtime_error("schedule_times must be a YAML list of HH:MM strings");
+    }
     if (indent > top_indent) continue;
+    reading_times = false;
     if (indent < top_indent) top_indent = indent;
     line = trim(line.substr(indent));
     const auto colon = line.find(':');
@@ -324,7 +347,22 @@ Config parse_config(const std::string &request) {
     if (colon == std::string::npos) continue;
     const auto key = trim(line.substr(0, colon));
     const auto value = unquote_yaml(line.substr(colon + 1));
-    if (key == "interval" && !value.empty()) {
+    if (key == "schedule_mode") {
+      const auto raw = line.substr(colon + 1);
+      cfg.schedule_mode = unquote_yaml(trim(raw.substr(0, raw.find(" #"))));
+    } else if (key == "schedule_times") {
+      cfg.schedule_times.clear();
+      const auto list = trim(line.substr(colon + 1, line.find(" #", colon + 1) - (colon + 1)));
+      if (list.empty() || list.front() == '#') {
+        reading_times = true;
+      } else if (list.front() == '[' && list.back() == ']') {
+        std::istringstream items(trim(list.substr(1, list.size() - 2)));
+        std::string item;
+        while (std::getline(items, item, ',')) add_time(item);
+      } else {
+        throw std::runtime_error("schedule_times must be a YAML list of HH:MM strings");
+      }
+    } else if (key == "interval" && !value.empty()) {
       cfg.interval = parse_duration(value);
       if (cfg.interval.count() <= 0) throw std::runtime_error("invalid interval");
     } else if (key == "startup_delay" && !value.empty()) {
@@ -347,7 +385,43 @@ Config parse_config(const std::string &request) {
       cfg.ping_spacing = parse_duration(value);
     }
   }
+  if (cfg.schedule_mode != "interval" && cfg.schedule_mode != "times") {
+    throw std::runtime_error("schedule_mode must be interval or times");
+  }
+  std::sort(cfg.schedule_times.begin(), cfg.schedule_times.end());
+  cfg.schedule_times.erase(std::unique(cfg.schedule_times.begin(), cfg.schedule_times.end()),
+                           cfg.schedule_times.end());
+  if (cfg.schedule_mode == "times" && cfg.schedule_times.empty()) {
+    throw std::runtime_error("schedule_times must not be empty in times mode");
+  }
   return cfg;
+}
+
+// Use local calendar dates rather than adding 24 hours across DST changes.
+Clock::time_point next_scheduled_time(const Config &cfg, Clock::time_point now) {
+  const auto timestamp = Clock::to_time_t(now);
+  std::tm local{};
+#if defined(_WIN32)
+  localtime_s(&local, &timestamp);
+#else
+  localtime_r(&timestamp, &local);
+#endif
+  auto next = Clock::time_point::max();
+  for (int day = 0; day <= 1; ++day) {
+    for (const auto &time : cfg.schedule_times) {
+      auto candidate = local;
+      candidate.tm_mday += day;
+      candidate.tm_hour = std::stoi(time.substr(0, 2));
+      candidate.tm_min = std::stoi(time.substr(3, 2));
+      candidate.tm_sec = 0;
+      candidate.tm_isdst = -1;
+      const auto result = std::mktime(&candidate);
+      if (result == static_cast<std::time_t>(-1)) continue;
+      const auto point = Clock::from_time_t(result);
+      if (point > now && point < next) next = point;
+    }
+  }
+  return next;
 }
 
 std::string ok_envelope(const std::string &result) {
@@ -427,7 +501,7 @@ void run_ping(const Config &cfg) {
 }
 
 void scheduler_loop(const std::shared_ptr<StopSignal> &stop, Config cfg) {
-  if (cfg.run_on_start) {
+  if (cfg.schedule_mode == "interval" && cfg.run_on_start) {
     if (!wait_or_stop(stop, cfg.startup_delay)) return;
     for (std::uint64_t index = 0; index < cfg.pings_per_cycle; ++index) {
       run_ping(cfg);
@@ -435,12 +509,19 @@ void scheduler_loop(const std::shared_ptr<StopSignal> &stop, Config cfg) {
     }
   }
   while (true) {
+    const auto next = cfg.schedule_mode == "times"
+                          ? next_scheduled_time(cfg, Clock::now())
+                          : Clock::now() + std::chrono::duration_cast<Clock::duration>(cfg.interval);
     {
       std::lock_guard<std::mutex> lock(g_state_mutex);
-      g_state.next_run =
-          Clock::now() + std::chrono::duration_cast<Clock::duration>(cfg.interval);
+      g_state.next_run = next;
     }
-    if (!wait_or_stop(stop, cfg.interval)) return;
+    if (cfg.schedule_mode == "times") {
+      std::unique_lock<std::mutex> lock(stop->mutex);
+      if (stop->wake.wait_until(lock, next, [&] { return stop->stopped; })) return;
+    } else if (!wait_or_stop(stop, cfg.interval)) {
+      return;
+    }
     for (std::uint64_t index = 0; index < cfg.pings_per_cycle; ++index) {
       run_ping(cfg);
       if (index + 1 < cfg.pings_per_cycle && !wait_or_stop(stop, cfg.ping_spacing)) return;
@@ -501,6 +582,13 @@ std::string status_response() {
   body << "{\n  \"plugin\": \"" << kPluginID << "\",\n"
        << "  \"version\": \"" << PLUGIN_VERSION << "\",\n"
        << "  \"model\": \"" << json_escape(g_state.cfg.model) << "\",\n"
+       << "  \"schedule_mode\": \"" << g_state.cfg.schedule_mode << "\",\n"
+       << "  \"schedule_times\": [";
+  for (std::size_t i = 0; i < g_state.cfg.schedule_times.size(); ++i) {
+    if (i != 0) body << ", ";
+    body << '"' << g_state.cfg.schedule_times[i] << '"';
+  }
+  body << "],\n"
        << "  \"interval\": \"" << format_duration(g_state.cfg.interval) << "\",\n"
        << "  \"pings_per_cycle\": " << g_state.cfg.pings_per_cycle << ",\n"
        << "  \"last_status\": " << g_state.last_status << ",\n"
@@ -523,6 +611,8 @@ std::string handle_method(const std::string &method, const std::string &request)
         "\"Version\":\"" PLUGIN_VERSION "\",\"Author\":\"KKKKeybird\","
         "\"GitHubRepository\":\"https://github.com/KKKKeybird/cpa-codex-auto-ping\","
         "\"Logo\":\"\",\"ConfigFields\":["
+        "{\"Name\":\"schedule_mode\",\"Type\":\"string\",\"Description\":\"interval (default) or times (daily local times).\"},"
+        "{\"Name\":\"schedule_times\",\"Type\":\"array\",\"Description\":\"Daily HH:MM strings in the host local timezone; used in times mode.\"},"
         "{\"Name\":\"interval\",\"Type\":\"string\",\"Description\":\"Ping interval, e.g. 5h.\"},"
         "{\"Name\":\"startup_delay\",\"Type\":\"string\",\"Description\":\"Delay before the startup ping.\"},"
         "{\"Name\":\"run_on_start\",\"Type\":\"boolean\",\"Description\":\"Send one ping after startup_delay.\"},"
