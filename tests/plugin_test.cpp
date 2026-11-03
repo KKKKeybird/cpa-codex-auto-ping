@@ -92,6 +92,16 @@ int main() {
   const auto midnight = parse_yaml("schedule_mode: times\nschedule_times: [00:00]\n");
   assert(next_scheduled_time(midnight, local_time(31, 23, 59)) == local_time(32, 0, 0));
 
+  // The CI Shanghai run verifies local scheduling and UTC status formatting.
+  if (const char *timezone = std::getenv("TZ");
+      timezone && std::string(timezone) == "Asia/Shanghai") {
+    const auto schedule = parse_yaml(
+        "schedule_mode: times\nschedule_times: [01:32, 06:55, 12:00]\n");
+    assert(format_time(local_time(25, 1, 32)) == "2026-01-24T17:32:00Z");
+    assert(format_time(next_scheduled_time(schedule, local_time(25, 1, 32))) ==
+           "2026-01-24T22:55:00Z");
+  }
+
   // A store-managed install hands over the whole subtree: host wrappers plus
   // the store manifest with a YAML sequence (tags) and nested mappings. None of
   // it may be mistaken for plugin settings, and none of it may fail the parse.

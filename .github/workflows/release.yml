@@ -12,15 +12,23 @@ permissions:
 
 jobs:
   build-linux:
-    name: Build linux-${{ matrix.arch }}
+    name: Build linux-${{ matrix.arch }}-${{ matrix.libc }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
             arch: amd64
+            libc: glibc
           - runner: ubuntu-24.04-arm
             arch: arm64
+            libc: glibc
+          - runner: ubuntu-latest
+            arch: amd64
+            libc: musl
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            libc: musl
 
     runs-on: ${{ matrix.runner }}
 
@@ -31,10 +39,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build musl plugin
+      - name: Build and test Linux plugin
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
+          LIBC: ${{ matrix.libc }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
@@ -49,16 +58,19 @@ jobs:
           docker buildx build \
             --platform "linux/${ARCH}" \
             --file Dockerfile.plugin \
+            --build-arg "LIBC=${LIBC}" \
             --output type=local,dest=package \
             .
-          ASSET="codex-auto-ping_${VERSION}_linux_${ARCH}.zip"
+          SUFFIX=""
+          if [[ "${LIBC}" == "musl" ]]; then SUFFIX="_musl"; fi
+          ASSET="codex-auto-ping_${VERSION}_linux_${ARCH}${SUFFIX}.zip"
           python -m zipfile -c "dist/${ASSET}" package/codex-auto-ping.so
           python -m zipfile -l "dist/${ASSET}"
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
-          name: codex-auto-ping-linux-${{ matrix.arch }}
+          name: codex-auto-ping-linux-${{ matrix.arch }}-${{ matrix.libc }}
           path: dist/*.zip
           if-no-files-found: error
 

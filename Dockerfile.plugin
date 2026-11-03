@@ -1,15 +1,22 @@
 # syntax=docker/dockerfile:1
-FROM alpine:3.22 AS builder
+ARG LIBC=glibc
+FROM debian:bookworm AS builder-glibc
+RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ make && rm -rf /var/lib/apt/lists/*
 
+FROM alpine:3.22 AS builder-musl
 RUN apk add --no-cache cmake g++ make
 
+FROM builder-${LIBC} AS builder
 WORKDIR /src
 COPY CMakeLists.txt ./
 COPY src ./src
-
-RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF && \
+COPY tests ./tests
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON && \
     cmake --build build --parallel && \
-    cp build/codex-auto-ping.so /codex-auto-ping.so
+    ctest --test-dir build --output-on-failure && \
+    cp build/codex-auto-ping.so /codex-auto-ping.so && \
+    cp build/plugin-load-check /plugin-load-check
 
 FROM scratch
 COPY --from=builder /codex-auto-ping.so /
+COPY --from=builder /plugin-load-check /

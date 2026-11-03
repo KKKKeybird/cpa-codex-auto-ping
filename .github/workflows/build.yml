@@ -11,15 +11,23 @@ permissions:
 
 jobs:
   build-linux:
-    name: Build linux-${{ matrix.arch }}
+    name: Build linux-${{ matrix.arch }}-${{ matrix.libc }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
             arch: amd64
+            libc: glibc
           - runner: ubuntu-24.04-arm
             arch: arm64
+            libc: glibc
+          - runner: ubuntu-latest
+            arch: amd64
+            libc: musl
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            libc: musl
 
     runs-on: ${{ matrix.runner }}
 
@@ -30,26 +38,40 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # The plugin is loaded by the musl-based CLIProxyAPI image, so build the
-      # Linux shared library with the same musl toolchain the release uses.
-      - name: Build musl plugin
+      - name: Build and test Linux plugin
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
+          LIBC: ${{ matrix.libc }}
         run: |
           set -euo pipefail
           mkdir -p dist
           docker buildx build \
             --platform "linux/${ARCH}" \
             --file Dockerfile.plugin \
+            --build-arg "LIBC=${LIBC}" \
             --output type=local,dest=dist \
             .
           test -s dist/codex-auto-ping.so
 
+      - name: Check dynamic loading in runtime image
+        shell: bash
+        env:
+          LIBC: ${{ matrix.libc }}
+        run: |
+          set -euo pipefail
+          if [[ "${LIBC}" == "glibc" ]]; then
+            IMAGE="eceasy/cli-proxy-api:latest"
+          else
+            IMAGE="alpine:3.22"
+          fi
+          docker run --rm -v "${PWD}/dist:/plugin:ro" \
+            --entrypoint /plugin/plugin-load-check "${IMAGE}" /plugin/codex-auto-ping.so
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-auto-ping-linux-${{ matrix.arch }}
+          name: codex-auto-ping-linux-${{ matrix.arch }}-${{ matrix.libc }}
           path: dist/codex-auto-ping.so
           if-no-files-found: error
 
